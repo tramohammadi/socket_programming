@@ -217,6 +217,10 @@ while True:
 
     for broken_socket in broken_clients:
         disconnect_client(broken_socket)
+    
+    if not clients:
+        print("No clients connected. Shutting down server...")
+        break
 
     for receiver in clients:
         if not receiver.send_buff.empty():

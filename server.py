@@ -56,26 +56,29 @@ def recv_packet(client):
         return None
 
 
-def notify_clients(user, status):
+def notify_clients():
     global clients
 
-    for client in clients:
-        data = (
-            f"{user.username} s {status}"
-        ).encode()
+    users_data = ",".join(
+        [client.username for client in clients]
+    )
 
+    data = f"USERS:{users_data}".encode()
+
+    for client in clients:
         client.send_buff.put(data)
 
 
 def send_online_users(new_user):
     global clients
 
-    for online_user in clients:
-        data = (
-            f"{online_user.username} s 1"
-        ).encode()
+    users_data = ",".join(
+        [client.username for client in clients]
+    )
 
-        new_user.send_buff.put(data)
+    data = f"USERS:{users_data}".encode()
+
+    new_user.send_buff.put(data)
 
 
 def get_username(client):
@@ -95,7 +98,7 @@ def get_username(client):
 
     send_packet(client, b"0")
 
-    print(f"{client.ip} is called {username}")
+    print(f"{client.port} is called {username}")
 
     return True
 
@@ -108,6 +111,9 @@ def handle_new_connection(server):
     client.setblocking(False)
 
     client.ip = addr[0]
+    client.port = addr[1]
+    client.address = f"{addr[0]}:{addr[1]}"
+
 
     print(f"{addr} connected")
 
@@ -117,11 +123,12 @@ def handle_new_connection(server):
         client.close()
         return
 
-    notify_clients(client, 1)
+    clients.add(client)
+
+    notify_clients()
 
     send_online_users(client)
 
-    clients.add(client)
 
 
 def broadcast_message(sender, message):
@@ -143,7 +150,7 @@ def broadcast_message(sender, message):
         if should_send:
 
             data = (
-                f"[{sender.ip}] {sender.username}: "
+                f"[{sender.address}] {sender.username}: "
             ).encode() + message
 
             receiver.send_buff.put(data)
@@ -168,7 +175,7 @@ def disconnect_client(client):
     if client in clients:
         clients.remove(client)
 
-    notify_clients(client, 0)
+    notify_clients()
 
     client.close()
 

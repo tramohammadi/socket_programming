@@ -56,16 +56,18 @@ def recv_packet(client):
         return None
 
 
-def notify_clients():
+def notify_clients(excluded_user=None):
     global clients
 
     users_data = ",".join(
-        [client.username for client in clients]
+        [f"[{client.port}] {client.username}" for client in clients]
     )
 
     data = f"USERS:{users_data}".encode()
 
     for client in clients:
+        if client == excluded_user:
+            continue
         client.send_buff.put(data)
 
 
@@ -73,7 +75,7 @@ def send_online_users(new_user):
     global clients
 
     users_data = ",".join(
-        [client.username for client in clients]
+        [f"[{client.port}] {client.username}" for client in clients]
     )
 
     data = f"USERS:{users_data}".encode()
@@ -125,19 +127,30 @@ def handle_new_connection(server):
 
     clients.add(client)
 
-    notify_clients()
+    notify_clients(client)
 
     send_online_users(client)
 
-
+def user_exists(username):
+    for client in clients:
+        if client.username == username:
+            return True
+    return False
 
 def broadcast_message(sender, message):
     global clients
 
     tagged_users = parse_tagged_users(message)
 
-    if tagged_users:
-        print(f"{sender.username} tagged {tagged_users}")
+    tagged_names = [tag[1:].decode() for tag in tagged_users]
+
+    if tagged_names:
+        missing = [name for name in tagged_names if not user_exists(name)]
+
+        if missing:
+            error_msg = f"User(s) {missing} do not exist.".encode()
+            sender.send_buff.put(error_msg)
+            return  # stop broadcasting
 
     for receiver in clients:
 
@@ -170,7 +183,7 @@ def handle_receiver(receiver):
 def disconnect_client(client):
     global clients
 
-    print(f"{client.ip} disconnected")
+    print(f"{client.address} disconnected")
 
     if client in clients:
         clients.remove(client)

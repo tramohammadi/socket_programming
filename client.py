@@ -1,6 +1,8 @@
 import socket
 import threading
-import sys
+import tkinter as tk
+from tkinter import scrolledtext, messagebox
+from datetime import datetime
 
 IP = "127.0.0.1"
 PORT = 1234
@@ -35,124 +37,173 @@ def recv_packet(sock):
     return data
 
 
-def receive_messages(sock):
-    while not stop_event.is_set():
+class ChatGUI:
+    def __init__(self, sock, username):
+        self.sock = sock
+        self.username = username
 
+        # ---- Main Window ----
+        self.root = tk.Tk()
+        self.root.title(f"Chat - {username}")
+        self.root.geometry("750x500")
+
+        # ---- Main Frame (Split Layout) ----
+        main_frame = tk.Frame(self.root)
+        main_frame.pack(fill=tk.BOTH, expand=True)
+
+        # Chat area (Left)
+        left_frame = tk.Frame(main_frame)
+        left_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=5, pady=5)
+
+        # Users list (Right)
+        right_frame = tk.Frame(main_frame, width=200)
+        right_frame.pack(side=tk.RIGHT, fill=tk.Y, padx=5, pady=5)
+
+        # Chat messages
+        self.chat_area = scrolledtext.ScrolledText(left_frame)
+        self.chat_area.pack(fill=tk.BOTH, expand=True)
+        self.chat_area.config(state="disabled")
+
+        # Message entry
+        bottom_frame = tk.Frame(left_frame)
+        bottom_frame.pack(fill=tk.X)
+        self.entry = tk.Entry(bottom_frame)
+        self.entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5, pady=5)
+        self.entry.bind("<Return>", self.send_message)
+
+        self.send_btn = tk.Button(bottom_frame, text="Send", command=self.send_message)
+        self.send_btn.pack(side=tk.LEFT, padx=5, pady=5)
+
+        self.exit_btn = tk.Button(bottom_frame, text="Exit", command=self.on_close)
+        self.exit_btn.pack(side=tk.LEFT, padx=5, pady=5)
+
+        # Online users part
+        self.users_label = tk.Label(right_frame, text="Online Users:", font=("Arial", 11, "bold"))
+        self.users_label.pack(anchor="nw")
+
+        self.users_list = tk.Listbox(right_frame)
+        self.users_list.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+
+        # Thread to receive messages
+        threading.Thread(target=self.receive_messages, daemon=True).start()
+        self.root.protocol("WM_DELETE_WINDOW", self.on_close)
+
+    def add_message(self, message):
+        timestamp = datetime.now().strftime("%H:%M:%S")
+        self.chat_area.config(state="normal")
+        self.chat_area.insert(tk.END, f"[{timestamp}] {message}\n")
+        self.chat_area.config(state="disabled")
+        self.chat_area.yview(tk.END)
+
+    def send_message(self, event=None):
+        message = self.entry.get().strip()
+        if not message:
+            return
         try:
-            data = recv_packet(sock)
-
-            if data is None:
-                print("server disconnected")
-                stop_event.set()
-                break
-
-            print(data.decode())
-
+            send_packet(self.sock, message.encode())
         except Exception as e:
-            if not stop_event.is_set():
-                print("receive failed:", e)
-            stop_event.set()
-            break
+            self.add_message(f"send failed: {e}")
+        self.entry.delete(0, tk.END)
 
-    try:
-        sock.close()
-    except:
-        pass
-
-
-def read_input(sock):
-    while not stop_event.is_set():
-
-        try:
-            message = input()
-
-            if message == "/exit":
-
-                try:
-                    send_packet(sock, message.encode())
-                except:
-                    pass
-
+    def receive_messages(self):
+        while not stop_event.is_set():
+            try:
+                data = recv_packet(self.sock)
+                if data is None:
+                    self.add_message("Server disconnected.")
+                    stop_event.set()
+                    break
+                message = data.decode()
+                if message.startswith("USERS:"):
+                    self.update_users(message)
+                else:
+                    self.add_message(message)
+            except Exception as e:
+                self.add_message(f"Receive error: {e}")
                 stop_event.set()
                 break
 
-            send_packet(sock, message.encode())
+        try:
+            self.sock.close()
+        except:
+            pass
 
-        except EOFError:
+    def update_users(self, message):
+        users = message.replace("USERS:", "").split(",")
+        self.users_list.delete(0, tk.END)
+        for user in users:
+            if user.strip():
+                self.users_list.insert(tk.END, user)
+
+    def on_close(self):
+        if messagebox.askokcancel("Exit", "Are you sure you want to exit?"):
+            try:
+                send_packet(self.sock, b"/exit")
+            except:
+                pass
             stop_event.set()
-            break
+            try:
+                self.sock.close()
+            except:
+                pass
+            self.root.destroy()
 
+    def run(self):
+        self.root.mainloop()
 
-def connect():
+class LoginGUI:
+    def __init__(self):
+        self.root = tk.Tk()
+        self.root.title("Login - Chat App")
+        self.root.geometry("300x180")
 
-    while True:
+        tk.Label(self.root, text="Enter Username:", font=("Arial", 12)).pack(pady=10)
+        self.username_entry = tk.Entry(self.root)
+        self.username_entry.pack(pady=5)
+        self.username_entry.bind("<Return>", self.connect)
 
-        username = input("enter username: ").strip()
+        self.connect_btn = tk.Button(self.root, text="Connect", command=self.connect)
+        self.connect_btn.pack(pady=10)
 
+        self.status_label = tk.Label(self.root, text="", fg="red")
+        self.status_label.pack()
+
+    def connect(self, event=None):
+        username = self.username_entry.get().strip()
         if not username:
-            continue
+            self.status_label.config(text="Username cannot be empty.")
+            return
 
-        client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-
+        client_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         try:
-            client.connect(ADDRESS)
+            client_sock.connect(ADDRESS)
         except Exception as e:
-            print("connection failed:", e)
-            continue
+            self.status_label.config(text=f"Connection failed: {e}")
+            return
 
-        send_packet(client, username.encode())
+        send_packet(client_sock, username.encode())
+        response = recv_packet(client_sock)
+        if not response:
+            self.status_label.config(text="Server error.")
+            client_sock.close()
+            return
 
-        response = recv_packet(client)
-
-        if response is None:
-            print("server error")
-            client.close()
-            continue
-
-        response = response.decode()
-
-        if response == "0":
-            print("connected to server")
-            return client
-
-        elif response == "1":
-            print("username already taken or invalid")
-            client.close()
-
+        code = response.decode()
+        if code == "0":
+            self.root.destroy()
+            chat_gui = ChatGUI(client_sock, username)
+            chat_gui.run()
+        elif code == "1":
+            self.status_label.config(text="Username taken or invalid.")
+            client_sock.close()
         else:
-            print("unknown server response")
-            client.close()
+            self.status_label.config(text="Unknown server response.")
+            client_sock.close()
 
 
 def main():
-
-    client = connect()
-
-    recv_thread = threading.Thread(
-        target=receive_messages,
-        args=(client,),
-        daemon=True
-    )
-
-    input_thread = threading.Thread(
-        target=read_input,
-        args=(client,),
-        daemon=True
-    )
-
-    recv_thread.start()
-    input_thread.start()
-
-    recv_thread.join()
-    input_thread.join()
-
-    try:
-        client.close()
-    except:
-        pass
-
-    print("client closed")
-    sys.exit(0)
+    login = LoginGUI()
+    login.root.mainloop()
 
 
 if __name__ == "__main__":
